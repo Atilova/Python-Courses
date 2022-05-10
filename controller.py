@@ -30,7 +30,8 @@ class Controller():
                     fromlist=['object']
                 ).SETUP
                 self.lessons[module] = setup
-            except ImportError:
+            except ImportError as error:
+                print(error)
                 colorize(USER_MESSAGES['import_error'].format(module))
                 return quit()
             except AttributeError:
