@@ -1,4 +1,7 @@
 from random import randint
+from time import time
+from datetime import datetime
+from datetime import timedelta
 from beautifultable import BeautifulTable
 from assets.colors import colorize
 from inspect import cleandoc
@@ -12,11 +15,40 @@ from abc import (
     abstractmethod
 )
 from typing import (
+    Literal,
     Tuple,
     Type,
     Dict,
     Any
 )
+from lessons.sixth.database.connector import Database
+from lessons.sixth.static import (
+    GameType,
+    AnswerType
+)
+
+
+def loop():
+    database = Database()
+    # database.migrate()
+
+    # user = database.create_new_user('Dima', 'Atilova', '1234')
+    user = database.authenticate_user('Atilova', '1234')
+    game = database.start_game(GameType.USER_GUESSES, user.id)    
+    database.add_attempt(game.id, False, 20, AnswerType.BIGGER)
+    database.add_attempt(game.id, False, 23, AnswerType.SMALLER)
+    database.add_attempt(game.id, True, 20, AnswerType.BIGGER)
+    database.add_attempt(game.id, False, 22, AnswerType.GUESSED)    
+    database.finish_game(game.id, 100, timedelta(seconds=8, minutes=10))
+
+
+    att = database.get_game_attempts(game.id)
+    print(len(att))
+    print(att[0].__dict__)
+    # games = database.get_all_games(user.username)
+    # print(len(games))
+
+
 
 
 class GameHelper(ABC):
@@ -39,7 +71,7 @@ class GameHelper(ABC):
     def run(self):
         self._execute()
 
-    def __call__(self, message_key: str, use_return=False, **formatting: Dict[str, Any]) -> None | str:
+    def __call__(self, message_key: str, use_return: Literal[True , False]=False, **formatting: Dict[str, Any]) -> None | str:
         if (notification := self.DEFAULT_MESSAGES.get(message_key)) is None:
             notification = self.game_messages[message_key]
         if formatting is not None:
@@ -393,7 +425,9 @@ def guess_computer_number():
 SETUP = {
     'description': 'Python Classes, map & filter',
     'solved': [
-        {'callback': guess_user_number, 'title': 'Computer tries to guess an user number'},
-        {'callback': guess_computer_number, 'title': 'User tries too guess a computer number'}
+        {'callback': loop, 'title': 'Games app'},
+
+        # {'callback': guess_user_number, 'title': 'Computer tries to guess an user number'},
+        # {'callback': guess_computer_number, 'title': 'User tries too guess a computer number'}
     ]
 }
