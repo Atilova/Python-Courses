@@ -11,7 +11,8 @@ LESSONS_LIST = [
     'second',
     'third',
     'fourth',
-    'fifth'
+    'fifth',
+    'fifth_improved'
 ]
 
 def initialize() -> None:
