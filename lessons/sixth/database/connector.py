@@ -5,7 +5,8 @@ from .models import initialize
 from functools import reduce
 from lessons.sixth import DATABASE
 from lessons.sixth.static import (
-    AnswerType, 
+    AnswerType,
+    GameLevel, 
     GameType
 )
 from bcrypt import (
@@ -103,10 +104,26 @@ class Database():
         return new_game
 
     @session_required()
-    def finish_game(self, game_id, points, guessed_in, session):
-        game = self.get_game(game_id, session=session)
+    def finish_game(self, game_id, guessed_in, session):
+        game = self.get_game(game_id, session=session)        
+        attempts = self.get_game_attempts(game_id, session=session)                    
+
+        total_fine = reduce(
+            lambda total, penalty: total+penalty, 
+            map(lambda attempt: attempt.penalty, attempts)
+        )
+        
+        if list(filter(lambda attempt: attempt.response in (AnswerType.CHEATED, AnswerType.OUT_OF_RANGE), attempts)):
+            points = 0
+        else:
+            complexity_points = 10
+            if game.level is GameLevel.ADVANCED:
+                complexity_points = 30
+            elif game.level is GameLevel.HARD:
+                complexity_points = 50
+            points = round(50 * (100 / guessed_in.total_seconds()) - total_fine*10 + complexity_points + 50 * (20 / len(attempts)))
+
         mask = 0b0
-        attempts = self.get_game_attempts(game_id, session=session)            
         if game.game_type is GameType.USER_GUESSES:
             for index, attempt in enumerate(attempts):
                 write = 0
@@ -117,11 +134,8 @@ class Database():
         update_with = {
             'points': points,
             'guessed_in': guessed_in,
-            'total_fine': reduce(
-                lambda total, penalty: total+penalty, 
-                map(lambda attempt: attempt.penalty, attempts)
-            ),
-            'bits_mask': format(mask, f'0{len(attempts)}b') if mask else ''  # Not to lose leading zeros
+            'total_fine': total_fine,
+            'bits_mask': format(mask, f'0{len(attempts)-1}b') if mask else ''  # Not to lose leading zeros, excluding guessed attempt
         }        
         for update in update_with.items():
             setattr(game, *update)
