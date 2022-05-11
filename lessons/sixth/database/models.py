@@ -1,6 +1,7 @@
 from lessons.sixth.static import (
     GameType,
-    AnswerType
+    AnswerType,
+    GameLevel
 )
 from sqlalchemy.orm import (
     backref, 
@@ -13,8 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Boolean,
     Interval,
-    Enum,
-    # Ti
+    Enum    
 )
 
 
@@ -36,6 +36,8 @@ def initialize(Base):
         points = Column(Integer, nullable=True)
         guessed_in = Column(Interval, nullable=True)
         bits_mask = Column(String, nullable=True)
+        total_fine = Column(Integer, nullable=True)
+        level = Column(Enum(GameLevel))
 
 
     class GameAttempt(Base):
