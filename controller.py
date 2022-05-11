@@ -31,8 +31,8 @@ class Controller():
                 ).SETUP
                 self.lessons[module] = setup
             except ImportError as error:
-                print(error)
                 colorize(USER_MESSAGES['import_error'].format(module))
+                print(error)
                 return quit()
             except AttributeError:
                 colorize(USER_MESSAGES['wrong_setup'].format(module))
