@@ -1,15 +1,12 @@
 from random import randint
-from time import time
-from datetime import datetime
-from datetime import timedelta
+from datetime import (
+    datetime, 
+    timedelta
+)
 from beautifultable import BeautifulTable
-from assets.colors import colorize
+from collections import deque
 from inspect import cleandoc
 from math import floor
-from enum import (
-    Enum,
-    auto
-)
 from abc import (
     ABC,
     abstractmethod
@@ -24,46 +21,20 @@ from typing import (
 from lessons.sixth.database.connector import Database
 from lessons.sixth.static import (
     GameType,
-    AnswerType
+    AnswerType,
+    GameLevel,
+    AUTH_MESSAGES,
+    DEFAULT_GAME_MESSAGES,
+    USER_COMPLEXITY_LEVELS,
+    USER_GAME_MESSAGES,
+    COMPUTER_GAME_MESSAGES,
+    COMPUTER_COMPLEXITY_LEVELS
 )
 
 
-def loop():
-    database = Database()
-    # database.migrate()
-
-    # user = database.create_new_user('Dima', 'Atilova', '1234')
-    user = database.authenticate_user('Atilova', '1234')
-    game = database.start_game(GameType.USER_GUESSES, user.id)    
-    database.add_attempt(game.id, False, 20, AnswerType.BIGGER)
-    database.add_attempt(game.id, False, 23, AnswerType.SMALLER)
-    database.add_attempt(game.id, True, 20, AnswerType.BIGGER)
-    database.add_attempt(game.id, False, 22, AnswerType.GUESSED)    
-    database.finish_game(game.id, 100, timedelta(seconds=8, minutes=10))
-
-
-    att = database.get_game_attempts(game.id)
-    print(len(att))
-    print(att[0].__dict__)
-    # games = database.get_all_games(user.username)
-    # print(len(games))
-
-
-
-
-class GameHelper(ABC):
-    DEFAULT_MESSAGES = {
-        'incorrect_level': colorize('<orange>You\'ve entered none existing level</orange>', use_print=False),
-        'request_level_message': 'Level: ',
-        'complexity_level': colorize(cleandoc("""            
-            Select one of the followind complexity levels, please: 
-            <cyan>{levels}</cyan>
-        """), use_print=False),
-        'selected_level': colorize('You selected: <cyan>{level}</cyan>', use_print=False),
-        'integer_only': 'Your number should be exactly an integer'
-    }
-        
-    def __init__(self, game_message: Dict[str, str], levels: Dict[str, Tuple[int, int]]) -> None:
+class GameHelper(ABC):            
+    def __init__(self, database, game_message: Dict[str, str], levels: Dict[str, Tuple[int, int]]) -> None:
+        self.database = database
         self.game_messages = game_message
         self.levels = levels
         self.complexity = self.__define_complexity()
@@ -72,7 +43,7 @@ class GameHelper(ABC):
         self._execute()
 
     def __call__(self, message_key: str, use_return: Literal[True , False]=False, **formatting: Dict[str, Any]) -> None | str:
-        if (notification := self.DEFAULT_MESSAGES.get(message_key)) is None:
+        if (notification := DEFAULT_GAME_MESSAGES.get(message_key)) is None:
             notification = self.game_messages[message_key]
         if formatting is not None:
             notification = notification.format(**formatting)
@@ -113,321 +84,391 @@ class GameHelper(ABC):
         ...
 
 
-def guess_user_number() -> None:
-    DEFAULT_HELP = cleandoc("""
-        \r\r
-        Help:
-            Bigger or > - means guessed number is bigger
-            Smaller or < - means guessed number is smaller
-            Yes or Y - computer guessed
-    """)
+class ComputerGuessGame(GameHelper):
+    def __init__(self) -> None:            
+        self.used = set()
+        super().__init__(COMPUTER_GAME_MESSAGES, COMPUTER_COMPLEXITY_LEVELS)
 
-    GAME_MESSAGES: Dict[str, str] = {
-        'easy_help': cleandoc("""
-            \r\r
-            Help:
-                No or N - incorrect guess
-                Yes or Y - computer guessed
-        """),
-        'advanced_help': DEFAULT_HELP,
-        'hard_help': DEFAULT_HELP,
-        'range_warning': colorize('<orange>Your number should be exactly in ({min_number} {max_number})</orange>', use_print=False),
-        'to_guess': colorize('<green>To Guess: {number}</green>', use_print=False),
-        'request_guessed': 'Enter number, so you won\'t forget it: ',
-        'easy_guess': 'Is your number: {number}? ',
-        'wrong_response': 'You set wrong response, try again',
-        'user_cheated': colorize('<red>You cheated on a computer, no numbers left</red>', use_print=False),
-        'computer_guessed': colorize('<rose>Hurray, Your number is: {number}</rose>', use_print=False),
-        'cheated_on_range': colorize('<red>You cheated, your number outside the range</red>', use_print=False),
-        'advanced_guess': 'Is {number} correct: '
-    }
-
-    COMPLEXITY_LEVELS: Dict[str, Tuple[int, int]] = {
-        'EASY': (-10, 10),  # Randoms only
-        'ADVANCED': (-50, 50),  # Both answers & randoms
-        'HARD': (-100, 100)  # Algorithm
-    }
-
-    class GameState(Enum):
-        GUESSED = auto()
-        BIGGER = auto()
-        SMALLER = ()
-        INCORRECT = auto()
-        CHEATED = auto()
-        OUT_OF_RANGE = auto()
-
-
-    class Game(GameHelper):
-        def __init__(self) -> None:            
-            self.used = set()
-            super().__init__(GAME_MESSAGES, COMPLEXITY_LEVELS)
+    def __mark_guessed_input(self) -> None:
+        self('to_guess', number=self._get_exactly_int(self('request_guessed', use_return=True)))            
     
-        def __mark_guessed_input(self) -> None:
-            self('to_guess', number=self._get_exactly_int(self('request_guessed', use_return=True)))            
-        
-        def _execute(self) -> None:
-            start, stop = self.complexity[1]
-            self(
-                'range_warning', 
-                min_number=start,
-                max_number=stop
-            )
-            complexity_lowered = self.complexity[0].lower()
-            self.__mark_guessed_input()
-            self(f'{complexity_lowered}_help')
-            self._start_level(complexity_lowered)
+    def _execute(self) -> None:
+        start, stop = self.complexity[1]
+        self(
+            'range_warning', 
+            min_number=start,
+            max_number=stop
+        )
+        complexity_lowered = self.complexity[0].lower()
+        self.__mark_guessed_input()
+        self(f'{complexity_lowered}_help')
+        self._start_level(complexity_lowered)
 
-        def __get_random(self, start: int, stop: int) -> int:
-            while (number := randint(start, stop)) in self.used:
-                ...
-            self.used.add(number)
-            return number
+    def __get_random(self, start: int, stop: int) -> int:
+        while (number := randint(start, stop)) in self.used:
+            ...
+        self.used.add(number)
+        return number
 
-        def __get_user_response(self, message_key: str, formatting: int) -> str:
-            return input(
-                self(message_key, number=formatting, use_return=True)
-            ).strip().lower()
-               
-        def __check_response(self, computer_supposes: int, message_key: str) -> Type[GameState]:
-            user_sign = self.__get_user_response(message_key, computer_supposes)
+    def __get_user_response(self, message_key: str, formatting: int) -> str:
+        return input(
+            self(message_key, number=formatting, use_return=True)
+        ).strip().lower()
+            
+    def __check_response(self, computer_supposes: int, message_key: str) -> Type[AnswerType]:
+        user_sign = self.__get_user_response(message_key, computer_supposes)
+        match user_sign:
+            case 'bigger' | '>' | 'smaller' | '<':
+                if user_sign in ('bigger', '>'):
+                    if computer_supposes == self.complexity[1][1]:
+                        return AnswerType.OUT_OF_RANGE
+                    return AnswerType.BIGGER
+                else:
+                    if computer_supposes == self.complexity[1][0]:
+                        return AnswerType.OUT_OF_RANGE
+                    return AnswerType.SMALLER
+            case 'yes' | 'y':
+                return AnswerType.GUESSED
+            case _:
+                self('wrong_response', number=computer_supposes)
+                return self.__check_response(computer_supposes, message_key)
+
+    def _run_easy_level(self) -> None:
+        def check_response(computer_supposes) -> Type[AnswerType]:
+            user_sign = self.__get_user_response('easy_guess', formatting=computer_supposes)
             match user_sign:
-                case 'bigger' | '>' | 'smaller' | '<':
-                    if user_sign in ('bigger', '>'):
-                        if computer_supposes == self.complexity[1][1]:
-                            return GameState.OUT_OF_RANGE
-                        return GameState.BIGGER
-                    else:
-                        if computer_supposes == self.complexity[1][0]:
-                            return GameState.OUT_OF_RANGE
-                        return GameState.SMALLER
                 case 'yes' | 'y':
-                    return GameState.GUESSED
+                    return AnswerType.GUESSED
+                case 'no' | 'n':
+                    total_number_count = abs(self.complexity[1][1] - self.complexity[1][0]) + 1
+                    if total_number_count == len(self.used):  # Check if all of possibilities were tried
+                        return AnswerType.CHEATED
+                    return AnswerType.INCORRECT                        
                 case _:
                     self('wrong_response', number=computer_supposes)
-                    return self.__check_response(computer_supposes, message_key)
+                    return check_response(computer_supposes)                        
+        
+        break_response = (AnswerType.GUESSED, AnswerType.CHEATED)
+        while (state := check_response((suppose := self.__get_random(*self.complexity[1])))) not in break_response:
+            pass
+        if state == AnswerType.GUESSED:
+            return self('computer_guessed', number=suppose)
+        self('user_cheated')
 
-        def _run_easy_level(self) -> None:
-            def check_response(computer_supposes) -> Type[GameState]:
-                user_sign = self.__get_user_response('easy_guess', formatting=computer_supposes)
-                match user_sign:
-                    case 'yes' | 'y':
-                        return GameState.GUESSED
-                    case 'no' | 'n':
-                        total_number_count = abs(self.complexity[1][1] - self.complexity[1][0]) + 1
-                        if total_number_count == len(self.used):  # Check if all of possibilities were tried
-                            return GameState.CHEATED
-                        return GameState.INCORRECT                        
-                    case _:
-                        self('wrong_response', number=computer_supposes)
-                        return check_response(computer_supposes)                        
-            
-            break_response = (GameState.GUESSED, GameState.CHEATED)
-            while (state := check_response((suppose := self.__get_random(*self.complexity[1])))) not in break_response:
-                pass
-            if state == GameState.GUESSED:
-                return self('computer_guessed', number=suppose)
-            self('user_cheated')
-
-        def _run_advanced_level(self) -> None:            
-            positions = [*self.complexity[1]]
-            while True:
-                suppose = self.__get_random(*positions)
-                match self.__check_response(suppose, 'advanced_guess'):
-                    case GameState.GUESSED:
-                        self('computer_guessed', number=suppose)
-                        break
-                    case GameState.BIGGER:
-                        positions[0] = suppose
-                    case GameState.SMALLER:
-                        positions[1] = suppose
-                    case GameState.OUT_OF_RANGE:
-                        self('cheated_on_range')
-                        break
-                if positions[1] - positions[0] <= 1:
-                    self('user_cheated')
+    def _run_advanced_level(self) -> None:            
+        positions = [*self.complexity[1]]
+        while True:
+            suppose = self.__get_random(*positions)
+            match self.__check_response(suppose, 'advanced_guess'):
+                case AnswerType.GUESSED:
+                    self('computer_guessed', number=suppose)
                     break
+                case AnswerType.BIGGER:
+                    positions[0] = suppose
+                case AnswerType.SMALLER:
+                    positions[1] = suppose
+                case AnswerType.OUT_OF_RANGE:
+                    self('cheated_on_range')
+                    break
+            if positions[1] - positions[0] <= 1:
+                self('user_cheated')
+                break
 
-        def _run_hard_level(self) -> None:
-            positions = [*self.complexity[1]]
-            suppose = positions[1]
-            while True:
-                self.used.add(suppose)
-                match self.__check_response(suppose, 'advanced_guess'):
-                    case GameState.GUESSED:
-                        self('computer_guessed', number=suppose)
-                        break
-                    case GameState.BIGGER:
-                        positions[0] = suppose
-                    case GameState.SMALLER:
-                        positions[1] = suppose
-                    case GameState.OUT_OF_RANGE:
-                        self('cheated_on_range')
-                        break
-                suppose = floor((positions[1]+positions[0]) / 2)   
-                if positions[1] - positions[0] <= 0 or suppose in self.used:
-                    self('user_cheated')
-                    break            
-
-
-    Game().run()    
-
-
-def guess_computer_number():
-    GAME_MESSAGES: Dict[str, str] = {
-        'say_range': colorize('<orange>Computer guessed number in range ({min_number} {max_number})</orange>', use_print=False),
-        'help': colorize(cleandoc("""
-            \r\r
-            Help:
-                Computer says <rose>bigger</rose> if guessed number <rose>is bigger</rose>
-                Computer says <rose>smaller</rose> if guessed number <rose>is smaller</rose>
-        """), use_print=False),
-        'user_guess': 'Guess a number: ',        
-        'user_guessed': colorize('<rose>Hurray, you won: {number}</rose>', use_print=False),
-        'bigger': 'Bigger',
-        'smaller': 'Smaller',
-        'fine': colorize('<red>Penalty point</red>', use_print=False),
-        'user_guessed_hard': colorize(cleandoc("""
-            <rose>Hurray, you guessed it: {number}</rose>
-            <orange>Attempts: {attempts}</orange>
-            <red>Penalty points: {points}</red>
-        """), use_print=False),
-        'results_help': colorize(cleandoc("""
-            \r\r
-            Results:
-                <orange>• All</orange> - get full data
-                <orange>• Bigger</orange> - get all bigger responses
-                <orange>• Smaller</orange> - get all smaller responses
-                <orange>• Even</orange> - get all even answers
-                <orange>• Quit</orange> - to exit
-        """), use_print=False),
-        'select_log_level': 'Select the log level, please: ',
-        'incorrect_log_level': 'You selected none existing log level, try again'
-    }
-
-    COMPLEXITY_LEVELS: Dict[str, Tuple[int, int]] = {
-        'EASY': (-100, 100),  # Game only
-        'HARD': (-100, 100)  # Handle Wrong Entries
-    }
-
-    class ComputerResponse(Enum):
-        BIGGER = auto()
-        SMALLER = auto()
-        GUESSED = auto()
-
-        def __call__(self):
-            return self.name.capitalize()
+    def _run_hard_level(self) -> None:
+        positions = [*self.complexity[1]]
+        suppose = positions[1]
+        while True:
+            self.used.add(suppose)
+            match self.__check_response(suppose, 'advanced_guess'):
+                case AnswerType.GUESSED:
+                    self('computer_guessed', number=suppose)
+                    break
+                case AnswerType.BIGGER:
+                    positions[0] = suppose
+                case AnswerType.SMALLER:
+                    positions[1] = suppose
+                case AnswerType.OUT_OF_RANGE:
+                    self('cheated_on_range')
+                    break
+            suppose = floor((positions[1]+positions[0]) / 2)   
+            if positions[1] - positions[0] <= 0 or suppose in self.used:
+                self('user_cheated')
+                break            
 
 
-    class Game(GameHelper):    
-        def __init__(self) -> None:
-            self.guesses = []
-            super().__init__(GAME_MESSAGES, COMPLEXITY_LEVELS)            
+class UserGuessGame(GameHelper):    
+    def __init__(self) -> None:
+        self.guesses = []
+        super().__init__(USER_GAME_MESSAGES, USER_COMPLEXITY_LEVELS)            
 
-        def _execute(self) -> None:
-            start, stop = self.complexity[1]
-            self.positions = [start, stop]
-            self.guessed = randint(start, stop)
-            self('say_range', min_number=start, max_number=stop)
-            self('help')
-            self._start_level(self.complexity[0].lower())
+    def _execute(self) -> None:
+        start, stop = self.complexity[1]
+        self.positions = [start, stop]
+        self.guessed = randint(start, stop)
+        self('say_range', min_number=start, max_number=stop)
+        self('help')
+        self._start_level(self.complexity[0].lower())
 
-        def __analyze_user_response(self, user_supposes):
-            def add_entry(number: int, result: Type[ComputerResponse], fine: True | False) -> None:
-                self.guesses.append({
-                    'number': number, 
-                    'result': result,
-                    'fine': fine
-                })
+    def __analyze_user_response(self, user_supposes):
+        def add_entry(number: int, result: Type[AnswerType], fine: True | False) -> None:
+            self.guesses.append({
+                'number': number, 
+                'result': result,
+                'fine': fine
+            })
 
-            response, fine = ComputerResponse.GUESSED, False
-            if user_supposes <= self.positions[0] or user_supposes >= self.positions[1]:
-                self('fine')
-                fine = True
-            if user_supposes < self.guessed:
-                response = ComputerResponse.BIGGER                
-                self.positions[0] = user_supposes if not fine else self.positions[0]
-            elif user_supposes > self.guessed:
-                response =ComputerResponse.SMALLER
-                self.positions[1] = user_supposes if not fine else self.positions[1]
-            add_entry(user_supposes, response, fine)
-            return response
+        response, fine = AnswerType.GUESSED, False
+        if user_supposes <= self.positions[0] or user_supposes >= self.positions[1]:
+            self('fine')
+            fine = True
+        if user_supposes < self.guessed:
+            response = AnswerType.BIGGER                
+            self.positions[0] = user_supposes if not fine else self.positions[0]
+        elif user_supposes > self.guessed:
+            response =AnswerType.SMALLER
+            self.positions[1] = user_supposes if not fine else self.positions[1]
+        add_entry(user_supposes, response, fine)
+        return response
 
-        def _run_easy_level(self):
-            while (suppose := self._get_exactly_int(self('user_guess', use_return=True))) != self.guessed:
-                self('bigger') if suppose < self.guessed else self('smaller')
-            self('user_guessed', number=suppose)
+    def _run_easy_level(self):
+        while (suppose := self._get_exactly_int(self('user_guess', use_return=True))) != self.guessed:
+            self('bigger') if suppose < self.guessed else self('smaller')
+        self('user_guessed', number=suppose)
 
-        def _run_hard_level(self):
-            while (
-                response := self.__analyze_user_response(
-                    self._get_exactly_int(self('user_guess', use_return=True))
-                )
-            ) != ComputerResponse.GUESSED:
-                self('bigger') if response == ComputerResponse.BIGGER else self('smaller')
-
-            self(
-                'user_guessed_hard', 
-                number=self.guessed, 
-                attempts=len(self.guesses), 
-                points=len(list(filter(lambda score: score['fine'], self.guesses)))
+    def _run_hard_level(self):
+        while (
+            response := self.__analyze_user_response(
+                self._get_exactly_int(self('user_guess', use_return=True))
             )
-            self('results_help')
-            while (log_level := input(self('select_log_level', use_return=True)).strip().lower()) not in 'quit':
-                match log_level:
-                    case 'all':
-                        to_display = self.guesses
-                    case 'bigger':
-                        to_display = filter(lambda score: score['result'] == ComputerResponse.BIGGER, self.guesses)
-                    case 'smaller':
-                        to_display = filter(lambda score: score ['result'] == ComputerResponse.SMALLER, self.guesses)
-                    case 'even':
-                        to_display = filter(lambda score: not score['number'] & 1, self.guesses)
-                    case _:
-                        self('incorrect_log_level')
-                        continue
+        ) != AnswerType.GUESSED:
+            self('bigger') if response == AnswerType.BIGGER else self('smaller')
 
-                table = BeautifulTable()
-                table.columns.header = ["№", 'Guess', 'Response', 'Fine']
-                for index, score in enumerate(to_display):
-                    table.rows.append([
-                        index+1,
-                        score['number'],
-                        score['result'](),
-                        '❌' if score['fine'] else '✔'
-                    ])
-                print(table)
-            
-            guess_numbers = tuple(score['number'] for score in self.guesses)
-            pairs = list(zip(guess_numbers, guess_numbers[1:]))
-            diff_more_five = list(
-                map(lambda pair: str(pair[1]), 
-                    filter(
-                        lambda pair: abs(pair[1] - pair[0]) >= 5, pairs
-                    )
-                )
-            )
-            print('\r\nFilter by 5 diff: ', ' -> '.join(diff_more_five))
+        self(
+            'user_guessed_hard', 
+            number=self.guessed, 
+            attempts=len(self.guesses), 
+            points=len(list(filter(lambda score: score['fine'], self.guesses)))
+        )
+        self('results_help')
+        while (log_level := input(self('select_log_level', use_return=True)).strip().lower()) not in 'quit':
+            match log_level:
+                case 'all':
+                    to_display = self.guesses
+                case 'bigger':
+                    to_display = filter(lambda score: score['result'] == AnswerType.BIGGER, self.guesses)
+                case 'smaller':
+                    to_display = filter(lambda score: score ['result'] == AnswerType.SMALLER, self.guesses)
+                case 'even':
+                    to_display = filter(lambda score: not score['number'] & 1, self.guesses)
+                case _:
+                    self('incorrect_log_level')
+                    continue
+
             table = BeautifulTable()
-            table.columns.header = ['Last Value', 'Next Value', 'Diff']
-            for row in map(lambda pair: (*pair, abs(pair[1] - pair[0])), pairs):
-                table.rows.append(row)
-            print('', 'Pairs Diff Table:', table, sep='\r\n')
-            table.clear(reset_columns=True)
-            table.columns.header = ['Guess', 'Degree']
-            for row in map(lambda number: (number, number**2), guess_numbers):
-                table.rows.append(row)
-            print('', 'Guesses Degree Table:', table, sep='\r\n')   
+            table.columns.header = ["№", 'Guess', 'Response', 'Fine']
+            for index, score in enumerate(to_display):
+                table.rows.append([
+                    index+1,
+                    score['number'],
+                    score['result'](),
+                    '❌' if score['fine'] else '✔'
+                ])
+            print(table)
+        
+        guess_numbers = tuple(score['number'] for score in self.guesses)
+        pairs = list(zip(guess_numbers, guess_numbers[1:]))
+        diff_more_five = list(
+            map(lambda pair: str(pair[1]), 
+                filter(
+                    lambda pair: abs(pair[1] - pair[0]) >= 5, pairs
+                )
+            )
+        )
+        print('\r\nFilter by 5 diff: ', ' -> '.join(diff_more_five))
+        table = BeautifulTable()
+        table.columns.header = ['Last Value', 'Next Value', 'Diff']
+        for row in map(lambda pair: (*pair, abs(pair[1] - pair[0])), pairs):
+            table.rows.append(row)
+        print('', 'Pairs Diff Table:', table, sep='\r\n')
+        table.clear(reset_columns=True)
+        table.columns.header = ['Guess', 'Degree']
+        for row in map(lambda number: (number, number**2), guess_numbers):
+            table.rows.append(row)
+        print('', 'Guesses Degree Table:', table, sep='\r\n')   
 
 
-    Game().run()         
+class App():    
+    def __init__(self) -> None:
+        self.database  = Database()
+        self.database.migrate()        
+        self.make_call = self.__select_auth_action
+        self.cancel_words = ('quit', 'q')
+    
+    def __call__(self, message_key, *formatting, use_print=True):
+        message = AUTH_MESSAGES.get(message_key)
+        if formatting is not None:
+            message = message.format(*formatting)
+        if not use_print:
+            return message
+        print(message)
+
+    def get_input(self, message_key, use_lower=False):
+        result = input(self(message_key, use_print=False)).strip()
+        return result.lower() if use_lower else result
+
+    def __call_next(self):
+        while self.make_call is not None:
+            yield self.make_call()
+
+    def run(self):
+        deque(self.__call_next())            
+
+    def __select_auth_action(self) -> None:
+        self('select_type')
+        while (action := self.get_input('select_action', use_lower=True)) not in ('register', 'r',  'login', 'l'):
+            pass
+        self.make_call = self.__make_authentication if action in ('login', 'l') else  self.__register_new_user
+
+    def __cancel_auth_action(self):
+        if input(self('auth_cancel', use_print=False)).strip().lower() in self.cancel_words:
+            self.make_call = self.__select_auth_action
+            return True
+        return False
+
+    def __make_authentication(self):        
+        if self.__cancel_auth_action():
+            return
+        username, password = self.get_input('auth_user_username'), \
+                             self.get_input('auth_user_password')   
+        user = self.database.authenticate_user(username, password)
+        if user != -1:
+            self.user = user
+            self.make_call = self.__select_game_action
+        else:
+            self('auth_incorrect')    
+        
+    def __register_new_user(self):
+        if self.__cancel_auth_action():
+            return
+        gamename = self.get_input('register_gamename').capitalize()        
+        while self.database.check_for_user((username := self.get_input('register_username'))) is not None:
+            self('register_username_taken')
+        while (password := self.get_input('register_password')) != self.get_input('register_password_confirm'):
+            self('register_password_not_matching')
+            if self.__cancel_auth_action():
+                return        
+        self.user = self.database.create_new_user(gamename, username, password)
+        self.make_call = self.__select_game_action
+
+    def __build_games_table(self, games, table_type, extra_message=None):
+        def make_formatting(data, handler):
+            if handler is not None:
+                return handler[0](data)
+            return data    
+        
+        table = BeautifulTable(detect_numerics=False)
+        title = extra_message or '' 
+        match table_type:
+            case 'USER':
+                title += 'USER GUESSES'                
+                fields_object = {
+                    'id': ('Id',),
+                    'points': ('Points',),
+                    'bits_mask': ('Bits',),
+                    'total_fine': ('Fine',),
+                    'level': ('Level', lambda data: data()),
+                    'guessed_in': ('Guessed In (s)', lambda data: f'{data.total_seconds():.0f}s')
+                }            
+            case  'COMPUTER':            
+                title += 'COMPUTER GUESSES'
+                fields_object = {
+                    'id': ('Id',),
+                    'points': ('Points',),
+                    'level': ('Level', lambda data: data()),
+                    'guessed_in': ('Guessed In (s)', lambda data: f'{data.total_seconds():.0f}s')
+                }
+            case 'ATTEMPTS':
+                title += 'GAME ATTEMPTS'
+                fields_object = {
+                    'suppose': ('Suppose',),
+                    'penalty': ('Penalty', lambda data: '🟥' if data else '🟩'),
+                    'response': ('Response', lambda data: data())                    
+                }
+            case _:
+                return -1        
+        print('\r\n', title)
+        table.columns.header = [value[0] for value in fields_object.values()]        
+        for game in games:
+            table.rows.append([
+                make_formatting(getattr(game, key), (value[1:] or None))                                
+                for key, value in fields_object.items()
+            ])            
+        print(table, '\r\n')        
+
+    def __select_game_action(self):        
+        def get_games():
+            if not (games := self.database.get_all_games(self.user.username)):
+                self('no_games')
+                return False
+            return games    
+
+        def get_user_games(games):
+            games = filter(
+                lambda game: game.game_type is GameType.USER_GUESSES, 
+                games
+            )
+            return games
+        
+        self('auth_success', self.user.gamename)
+        while True:            
+            self('main_action_helper')        
+            action = self.get_input('select_action')
+            match action[:1] if action.endswith(')') else action:
+                case '1':
+                    if not (games := get_games()):
+                        continue
+                    games = get_user_games(games)    
+                    self.__build_games_table(
+                        sorted(games, key=lambda game: (game.points, -game.id))[:10],
+                        'USER'
+                    )
+                case '2':                    
+                    if not (games := get_games()):
+                        continue
+                    user_guesses = list(get_user_games(games))
+                    computer_guesses = set(games) - set(user_guesses)
+                    self.__build_games_table(
+                        sorted(computer_guesses, key=lambda user_game: user_game.id),
+                        'COMPUTER'
+                    )
+                    self.__build_games_table(
+                        user_guesses,
+                        'USER'
+                    )
+                case '3':
+                    game_id = self.get_input('enter_game_id')
+                    if (game := self.database.get_game(game_id)) is None or game.user_id != self.user.id:
+                        self('incorrect_game_id')
+                        continue
+                    
+                    self.__build_games_table(
+                        self.database.get_game_attempts(game.id),
+                        'ATTEMPTS',
+                        extra_message=f'{game.game_type()}({game.id}): '
+                    )
+                case '4':
+                    ...
+                case '5':
+                    if self.get_input('auth_logout_confirm') in ('yes', 'y'):
+                        break
+                case _:
+                    self('action_not_exists')
+        self.make_call = None              
 
 
 SETUP = {
     'description': 'Python Classes, map & filter',
     'solved': [
-        {'callback': loop, 'title': 'Games app'},
-
-        # {'callback': guess_user_number, 'title': 'Computer tries to guess an user number'},
-        # {'callback': guess_computer_number, 'title': 'User tries too guess a computer number'}
+        {'callback': App().run, 'title': 'Games app'}
     ]
 }
