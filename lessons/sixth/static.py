@@ -10,19 +10,18 @@ from enum import (
     Enum,
     auto
 )
-from abc import ABC
 
 
-class Caller(ABC):
+class ImprovedEnum(Enum):
     def __call__(self):
         return self.name
 
-class GameType(Caller, Enum):
+class GameType(ImprovedEnum):
     COMPUTER_GUESSES = auto()
     USER_GUESSES = auto()
 
 
-class AnswerType(Caller, Enum):
+class AnswerType(ImprovedEnum):
     SMALLER = auto()
     BIGGER = auto()
     INCORRECT = auto()
@@ -31,10 +30,10 @@ class AnswerType(Caller, Enum):
     OUT_OF_RANGE = auto()
 
 
-class GameLevel(Caller, Enum):        
+class GameLevel(ImprovedEnum):        
     EASY = auto()
-    HARD = auto()
     ADVANCED = auto()
+    HARD = auto()
 
 
 AUTH_MESSAGES = {
@@ -71,7 +70,9 @@ AUTH_MESSAGES = {
         1) Computer guesses
         2) You guess
     """),
-    'no_games': 'You don`t have any games'
+    'select_game_input': 'Select game: ',
+    'no_games': 'You don`t have any games',
+    'main_menu': 'You are back to main menu'
 }
 
 DEFAULT_GAME_MESSAGES = {
@@ -132,6 +133,7 @@ USER_GAME_MESSAGES: Dict[str, str] = {
     'bigger': 'Bigger',
     'smaller': 'Smaller',
     'fine': colorize('<red>Penalty point</red>', use_print=False),
+    'user_guessed_hard_improved': colorize('<rose>Hurray, you guessed it: {number}</rose>', use_print=False),
     'user_guessed_hard': colorize(cleandoc("""
         <rose>Hurray, you guessed it: {number}</rose>
         <orange>Attempts: {attempts}</orange>
