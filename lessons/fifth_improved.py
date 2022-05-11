@@ -293,8 +293,7 @@ class UserGuessGame(GameHelper):
 
 class App():    
     def __init__(self) -> None:
-        self.database  = Database()
-        self.database.migrate()        
+        self.database  = Database()                
         self.make_call = self.__select_auth_action
         self.cancel_words = ('quit', 'q')
     
@@ -315,6 +314,7 @@ class App():
             yield self.make_call()
 
     def run(self) -> None:
+        self.database.migrate()
         deque(self.__call_next())            
 
     def __select_auth_action(self) -> None:
