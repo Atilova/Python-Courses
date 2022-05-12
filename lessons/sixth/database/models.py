@@ -31,7 +31,7 @@ def initialize(Base):
         __tablename__ = 'games'
         id = Column(Integer, primary_key=True, unique=True, autoincrement=True)
         game_type = Column(Enum(GameType))
-        user = relationship('User', backref=backref('games'))
+        user = relationship('User', backref=backref('games', cascade='all,delete'))
         user_id = Column(Integer, ForeignKey('users.id'))
         points = Column(Integer, nullable=True)
         guessed_in = Column(Interval, nullable=True)
@@ -43,7 +43,7 @@ def initialize(Base):
     class GameAttempt(Base):
         __tablename__ = 'attempts'
         id = Column(Integer, primary_key=True, unique=True, autoincrement=True)
-        game = relationship('Game', backref=backref('attempts'))
+        game = relationship('Game', backref=backref('attempts', cascade='all,delete'))
         game_id = Column(Integer, ForeignKey('games.id'))
         penalty = Column(Boolean, default=False)
         suppose = Column(Integer)

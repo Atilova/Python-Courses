@@ -315,6 +315,7 @@ class App():
 
     def run(self) -> None:
         self.database.migrate()
+        self.database.delete_not_finished_games()
         deque(self.__call_next())            
 
     def __select_auth_action(self) -> None:
@@ -359,10 +360,7 @@ class App():
             if handler is not None:
                 return handler[0](data)
             return data    
-        
-        if not games:
-            return self('no_games')
-
+                
         table = BeautifulTable(detect_numerics=False)
         title = extra_message or '' 
         match table_type:
@@ -392,8 +390,12 @@ class App():
                     'response': ('Response', lambda data: data())                    
                 }
             case _:
-                return -1        
+                return -1     
         print('\r\n', title)
+        if not games:
+            self('no_games')
+            return print()
+
         table.columns.header = [value[0] for value in fields_object.values()]        
         for game in games:
             table.rows.append([

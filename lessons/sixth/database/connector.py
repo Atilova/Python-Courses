@@ -152,3 +152,9 @@ class Database():
         new_attempt = self.md_GameAttempt(**attempt_object)
         session.add(new_attempt)
         return new_attempt
+
+    @session_required()
+    def delete_not_finished_games(self, session):        
+        for game in session.query(self.md_Game).all():
+            if game.guessed_in is None:
+                session.delete(game)                                
